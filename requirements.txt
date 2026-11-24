@@ -1,0 +1,8 @@
+numpy
+scipy
+matplotlib
+numba
+pyproj
+cutde        # quasi-static dislocation solvers (--solver qs-full / qs-half); the dynamic solver (ar) works without it
+sympy        # only needed to re-derive the Aki & Richards kernel (gen_kernel.py)
+lupa         # optional: read the initial stress from a SeisSol easi yaml (--seissol-yaml)

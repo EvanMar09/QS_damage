@@ -1,0 +1,117 @@
+# fault_tensor_depthdep_TW_S.yaml  (time-weakening nucleation, FL=16)
+# Hypocenter S on the 'smooth1' mesh: local (8593.1, -5400.1) m, UTM (587222.859, 3629547.423), depth 8 km
+# Adapted from fault_tensor_depthdep_SNuc.yaml
+# SHmax azimuth 350 deg, litho coefficient 0.25, cohesion -2 MPa at the
+# surface tapering linearly to 0 at 2 km depth (negative sign per SeisSol),
+# mu_d 0.75 -> 0.60 over the top 1 km, then 0.60 -> 0.15 over the next 1 km, shear_ratio = 0.36520.
+# Nucleation: forced rupture time inside r_crit (no mu_s taper); mu_s uniform.
+#
+# TO MOVE THE HYPOCENTER / USE A NEW MESH, edit only the block marked "EDIT":
+#   - utm_off_x/y : the UTM 11N coordinates of the mesh's local origin (x=0, y=0)
+#   - hyp_utm_x/y : hypocenter in true UTM 11N
+#   - hyp_depth, r_crit, vs
+# Defaults below reproduce the OLD hypocenter on the OLD mesh offset.
+
+!<!Switch>
+[s_xx, s_yy, s_zz, s_xy, s_yz, s_xz, nuc_xx, nuc_yy, nuc_zz, nuc_xy, nuc_yz, nuc_xz, mu_s, mu_d, d_c, cohesion, forced_rupture_time]: !<!LuaMap>
+  returns: [s_xx, s_yy, s_zz, s_xy, s_yz, s_xz, nuc_xx, nuc_yy, nuc_zz, nuc_xy, nuc_yz, nuc_xz, mu_s, mu_d, d_c, cohesion, forced_rupture_time]
+  function: |
+    function f (x)
+      -- ===================== EDIT =====================
+      -- UTM 11N of the mesh local origin (unchanged: the smoothed meshes keep the same origin)
+      local utm_off_x, utm_off_y = 578629.759, 3634947.523
+      -- Hypocenter in true UTM 11N and depth (m, positive down)
+      local hyp_utm_x, hyp_utm_y = 587222.859, 3629547.423
+      local hyp_depth = 8000.0
+      local r_crit = 2500.0      -- nucleation radius (m)
+      local vs = 3464.0          -- shear wave speed near hypocenter (m/s): SET TO YOUR MODEL
+      local mu_s_uniform = 0.6
+      -- ================================================
+
+      local az_deg = 350.0
+      local az = az_deg * math.pi / 180.0
+      local phi = math.pi/2.0 - az
+
+      local function sigma_v(depth)
+        local g = 9.81
+        local layers = {
+          {0.0,     1000.0,  2300.0},
+          {1000.0,  3000.0,  2500.0},
+          {3000.0,  6000.0,  2600.0},
+          {6000.0,  10000.0, 2700.0},
+          {10000.0, 1.0e9,   2750.0},
+        }
+        local sv = 0.0
+        for i = 1, #layers do
+          local top, bot, rho = layers[i][1], layers[i][2], layers[i][3]
+          if depth > top then
+            local d_in = math.min(depth, bot) - top
+            sv = sv + 0.25 * g * rho * d_in
+          end
+        end
+        return sv
+      end
+
+      local depth_real = -x['z']
+      local depth_clamped = math.min(depth_real, 5000.0)
+
+      local sigma_mean = sigma_v(depth_clamped)
+      local szz = -sigma_mean
+
+      local shear_ratio = 13.4347e6 / 36.7875e6
+      local sigma_diff = shear_ratio * sigma_mean
+
+      local S_Hmax = sigma_mean + sigma_diff
+      local S_hmin = sigma_mean - sigma_diff
+
+      local c = math.cos(phi)
+      local s = math.sin(phi)
+
+      local sxx =  (S_Hmax*c*c + S_hmin*s*s)
+      local syy =  (S_Hmax*s*s + S_hmin*c*c)
+      local sxy =  (S_Hmax - S_hmin)*s*c
+
+      sxx = -sxx
+      syy = -syy
+      sxy = -sxy
+
+      -- hypocenter in local mesh frame
+      local xh = hyp_utm_x - utm_off_x
+      local yh = hyp_utm_y - utm_off_y
+      local zh = -hyp_depth
+      local r = math.sqrt((x['x']-xh)^2 + (x['y']-yh)^2 + (x['z']-zh)^2)
+
+      -- time-weakening nucleation (SCEC-style forced rupture time)
+      local t_forced = 1.0e10
+      if (r < r_crit) then
+        local v = 0.7 * vs
+        t_forced = r / v + 0.081 * r_crit / v * (1.0 / (1.0 - (r / r_crit)^2) - 1.0)
+        t_forced = math.min(t_forced, 1.0e10)
+      end
+
+      -- layered dynamic friction: 0.75 at the surface -> 0.60 at 1 km,
+      -- then 0.60 -> background (0.15) between 1 km and 2 km, constant below
+      local mu_d_base = 0.15
+      local mu_d_val
+      if depth_real >= 2000.0 then
+        mu_d_val = mu_d_base
+      elseif depth_real >= 1000.0 then
+        mu_d_val = 0.60 - (0.60 - mu_d_base) * (depth_real - 1000.0) / 1000.0
+      else
+        mu_d_val = 0.75 - (0.75 - 0.60) * depth_real / 1000.0
+      end
+
+      local coh_val = 0.0e6 * math.max(0.0, 1.0 - depth_real / 2000.0)
+
+      return {
+        s_xx = sxx, s_yy = syy, s_zz = szz,
+        s_xy = sxy, s_yz = 0.0, s_xz = 0.0,
+        nuc_xx = 0.0, nuc_yy = 0.0, nuc_zz = 0.0,
+        nuc_xy = 0.0, nuc_yz = 0.0, nuc_xz = 0.0,
+        mu_s = mu_s_uniform,
+        mu_d = mu_d_val,
+        d_c = 0.1,
+        cohesion = coh_val,
+        forced_rupture_time = t_forced
+      }
+    end
